@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 class Api::V1::Users::SessionsController < Devise::SessionsController
-  before_action :sign_in_params, only: [:create, :load_user]
-  before_action :load_user
+  before_action :sign_in_params, only: :create
+  before_action :load_user, only: :create
+  before_action :valid_token, only: :destroy
+  skip_before_action :verify_signed_out_user, only: :destroy
   # GET /resource/sign_in
   # def new
   #   super
@@ -10,7 +12,7 @@ class Api::V1::Users::SessionsController < Devise::SessionsController
   # POST /resource/sign_in
   def create
     if @user.valid_password?(sign_in_params[:password])
-      sign_in "user", @user
+      sign_in :user, @user
       render json: {
         messages: 'Signed in Successfully',
         is_success: true,
@@ -18,33 +20,49 @@ class Api::V1::Users::SessionsController < Devise::SessionsController
           user: @user
         },
       }, status: :ok
+    else  
+      render json: {
+        messages: 'Wrong Email or Password',
+        is_success: false,
+        data: {},
+      }, status: :unauthorized
     end
   end
 
   # DELETE /resource/sign_out
   def destroy
-    signed_out = (Devise.sign_out_all_scopes ? sign_out : sign_out(resource_name))
-    if signed_out
-      render json: { 
-        messages: 'Signed Out Successfully',
-        is_success: true,
-        data: {
-          user: @user
-        },
-      }, status: :ok
-    end
+    sign_out @user
+    @user.generate_authentication_token
+    render json: {
+      messages: 'Signed Out Successfully',
+      is_success: true,
+      data: {
+        user: @user
+      },
+    }, status: :ok
   end
 
-  protected
+  private
 
   def load_user
     @user = User.find_for_database_authentication(email: sign_in_params[:email])
-    if !@user.nil?
-      return @user
-    end
+    return @user if !@user.nil?
   end
   # If you have extra params to permit, append them to the sanitizer.
   def sign_in_params
     params.require(:sign_in).permit(:email, :password)
+  end
+
+  def valid_token
+    @user = User.find_by(authentication_token: request.headers["AUTH-TOKEN"])
+    if @user
+      return @user
+    else
+      render json:{
+        messages: 'Invalid Token',
+        is_success: false,
+        data: {},
+      }, status: :failure
+    end
   end
 end
